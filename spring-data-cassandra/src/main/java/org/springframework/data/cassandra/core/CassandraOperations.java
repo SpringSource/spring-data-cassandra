@@ -17,6 +17,7 @@ package org.springframework.data.cassandra.core;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.springframework.dao.DataAccessException;
@@ -41,6 +42,7 @@ import com.datastax.oss.driver.api.core.cql.Statement;
  * @author David Webb
  * @author Matthew Adams
  * @author Mark Paluch
+ * @author Tomasz Lelek
  * @see CassandraTemplate
  * @see CqlOperations
  * @see Statement
@@ -79,6 +81,16 @@ public interface CassandraOperations extends FluentCassandraOperations {
 	 * @return the {@link CqlIdentifier}
 	 */
 	CqlIdentifier getTableName(Class<?> entityClass);
+
+
+	/**
+	 * The keyspace used for the specified class by this template.
+	 *
+	 * @param entityClass entity class, may be {@literal null}.
+	 * @return the {@link Optional<CqlIdentifier> } the keyspace to which the entity shall be persisted. If null, then
+	 *         default session-level keyspace will be used.
+	 */
+	Optional<CqlIdentifier> getKeyspaceName(Class<?> entityClass);
 
 	// -------------------------------------------------------------------------
 	// Methods dealing with static CQL

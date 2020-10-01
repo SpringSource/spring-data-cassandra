@@ -56,6 +56,7 @@ import com.datastax.oss.driver.api.core.type.codec.registry.CodecRegistry;
  * @author John Blum
  * @author Jens Schauder
  * @author Vagif Zeynalov
+ * @author Toamsz Lelek
  */
 public class CassandraMappingContext
 		extends AbstractMappingContext<BasicCassandraPersistentEntity<?>, CassandraPersistentProperty>
@@ -72,7 +73,7 @@ public class CassandraMappingContext
 	private Mapping mapping = new Mapping();
 
 	private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
-
+	
 	private @Deprecated @Nullable UserTypeResolver userTypeResolver;
 
 	private @Deprecated CodecRegistry codecRegistry = CodecRegistry.DEFAULT;

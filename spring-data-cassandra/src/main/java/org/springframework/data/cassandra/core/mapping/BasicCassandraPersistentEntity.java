@@ -43,6 +43,7 @@ import com.datastax.oss.driver.api.core.CqlIdentifier;
  * @author Matthew T. Adams
  * @author John Blum
  * @author Mark Paluch
+ * @author Tomasz Lelek
  */
 public class BasicCassandraPersistentEntity<T> extends BasicPersistentEntity<T, CassandraPersistentProperty>
 		implements CassandraPersistentEntity<T>, ApplicationContextAware {
@@ -58,6 +59,8 @@ public class BasicCassandraPersistentEntity<T> extends BasicPersistentEntity<T, 
 	private NamingStrategy namingStrategy = NamingStrategy.INSTANCE;
 
 	private @Nullable StandardEvaluationContext spelContext;
+
+	@SuppressWarnings("OptionalUsedAsFieldOrParameterType") private Optional<CqlIdentifier> keyspaceName = Optional.empty();
 
 	/**
 	 * Create a new {@link BasicCassandraPersistentEntity} given {@link TypeInformation}.
@@ -212,6 +215,7 @@ public class BasicCassandraPersistentEntity<T> extends BasicPersistentEntity<T, 
 		Assert.notNull(namingStrategy, "NamingStrategy must not be null");
 
 		this.namingStrategy = namingStrategy;
+		setKeyspaceName(namingStrategy.getKeyspaceName(this));
 	}
 
 	NamingStrategy getNamingStrategy() {
@@ -224,6 +228,16 @@ public class BasicCassandraPersistentEntity<T> extends BasicPersistentEntity<T, 
 	@Override
 	public CqlIdentifier getTableName() {
 		return Optional.ofNullable(this.tableName).orElseGet(this::determineTableName);
+	}
+
+	@Override
+	public Optional<CqlIdentifier> getKeyspaceName() {
+		return keyspaceName;
+	}
+
+	@Override
+	public void setKeyspaceName(Optional<CqlIdentifier> keyspaceName) {
+		this.keyspaceName = keyspaceName;
 	}
 
 	/**

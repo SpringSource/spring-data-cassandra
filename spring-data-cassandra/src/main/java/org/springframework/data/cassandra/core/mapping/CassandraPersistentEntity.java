@@ -15,6 +15,8 @@
  */
 package org.springframework.data.cassandra.core.mapping;
 
+import java.util.Optional;
+
 import org.springframework.data.mapping.PersistentEntity;
 import org.springframework.util.Assert;
 
@@ -26,6 +28,7 @@ import com.datastax.oss.driver.api.core.CqlIdentifier;
  * @author Alex Shvid
  * @author Matthew T. Adams
  * @author Mark Paluch
+ * @author Tomasz Lelek
  */
 public interface CassandraPersistentEntity<T> extends PersistentEntity<T, CassandraPersistentProperty> {
 
@@ -50,6 +53,21 @@ public interface CassandraPersistentEntity<T> extends PersistentEntity<T, Cassan
 	 */
 	CqlIdentifier getTableName();
 
+
+	/**
+	 * Returns the keyspace to which the entity shall be persisted. It returns {@code Optional.empty()} if there is no
+	 * keyspace explicitly set
+	 */
+	Optional<CqlIdentifier> getKeyspaceName();
+
+	/**
+	 * Sets the CQL table name.
+	 *
+	 * @param keyspaceName if is {@code Optional.empty()}, then session level keyspace will be used.
+	 */
+	@SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+	void setKeyspaceName(Optional<CqlIdentifier> keyspaceName);
+
 	/**
 	 * Sets the CQL table name.
 	 *
@@ -69,6 +87,7 @@ public interface CassandraPersistentEntity<T> extends PersistentEntity<T, Cassan
 	 * @param tableName must not be {@literal null}.
 	 */
 	void setTableName(CqlIdentifier tableName);
+
 
 	/**
 	 * @return {@literal true} if the type is a mapped tuple type.

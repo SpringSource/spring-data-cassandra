@@ -23,12 +23,13 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
 import org.springframework.beans.DirectFieldAccessor;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.annotation.AliasFor;
@@ -172,6 +173,25 @@ class BasicCassandraPersistentEntityUnitTests {
 
 		verifyZeroInteractions(handlerMock);
 	}
+
+
+	@Test // DATACASS-751
+	void shouldSetKeyspace(){
+		BasicCassandraPersistentEntity<Notification> entity = new BasicCassandraPersistentEntity<>(
+				ClassTypeInformation.from(Notification.class));
+
+		assertThat(entity.getKeyspaceName().isPresent()).isFalse();
+
+		entity.setNamingStrategy(new NamingStrategy() {
+			@Override
+			public Optional<CqlIdentifier> getKeyspaceName(CassandraPersistentEntity<?> entity) {
+				return Optional.of(CqlIdentifier.fromCql("ks1"));
+			}
+		});
+
+		assertThat(entity.getKeyspaceName().get()).isEqualTo(CqlIdentifier.fromCql("ks1"));
+	}
+
 
 	@Table("messages")
 	static class Message {}

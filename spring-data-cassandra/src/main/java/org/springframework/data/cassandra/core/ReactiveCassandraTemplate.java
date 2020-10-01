@@ -15,16 +15,17 @@
  */
 package org.springframework.data.cassandra.core;
 
+import com.datastax.oss.driver.api.core.CqlSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
 
 import java.util.Collections;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import org.reactivestreams.Publisher;
-
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -100,6 +101,7 @@ import com.datastax.oss.driver.api.querybuilder.update.Update;
  * @author John Blum
  * @author Lukasz Antoniak
  * @author Hleb Albau
+ * @author Tomasz Lelek
  * @since 2.0
  */
 public class ReactiveCassandraTemplate
@@ -125,7 +127,7 @@ public class ReactiveCassandraTemplate
 	 *
 	 * @param session {@link ReactiveSession} used to interact with Cassandra; must not be {@literal null}.
 	 * @see CassandraConverter
-	 * @see Session
+	 * @see CqlSession
 	 */
 	public ReactiveCassandraTemplate(ReactiveSession session) {
 		this(session, newConverter());
@@ -280,6 +282,14 @@ public class ReactiveCassandraTemplate
 		return getRequiredPersistentEntity(entityClass).getTableName();
 	}
 
+	Optional<CqlIdentifier> getKeyspaceName(Class<?> entityClass) {
+		return getRequiredPersistentEntity(entityClass).getKeyspaceName();
+	}
+
+	TableCoordinates getTableCoordinates(Class<?> entityClass){
+		return TableCoordinates.of(getRequiredPersistentEntity(entityClass));
+	}
+
 	// -------------------------------------------------------------------------
 	// Methods dealing with static CQL
 	// -------------------------------------------------------------------------
@@ -366,10 +376,11 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(query, "Query must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doSelect(query, entityClass, getTableName(entityClass), entityClass);
+		return doSelect(query, entityClass, getTableCoordinates(entityClass), entityClass);
 	}
 
-	<T> Flux<T> doSelect(Query query, Class<?> entityClass, CqlIdentifier tableName, Class<T> returnType) {
+	<T> Flux<T> doSelect(Query query, Class<?> entityClass, TableCoordinates tableCoordinates,
+			Class<T> returnType) {
 
 		CassandraPersistentEntity<?> persistentEntity = getRequiredPersistentEntity(entityClass);
 
@@ -378,9 +389,9 @@ public class ReactiveCassandraTemplate
 
 		Query queryToUse = query.columns(columns);
 
-		StatementBuilder<Select> select = getStatementFactory().select(queryToUse, persistentEntity, tableName);
+		StatementBuilder<Select> select = getStatementFactory().select(queryToUse, persistentEntity, tableCoordinates);
 
-		Function<Row, T> mapper = getMapper(entityClass, returnType, tableName);
+		Function<Row, T> mapper = getMapper(entityClass, returnType, tableCoordinates.getTableName());
 
 		return getReactiveCqlOperations().query(select.build(), (row, rowNum) -> mapper.apply(row));
 	}
@@ -422,14 +433,14 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(update, "Update must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doUpdate(query, update, entityClass, getTableName(entityClass)).map(WriteResult::wasApplied);
+		return doUpdate(query, update, entityClass, getTableCoordinates(entityClass)).map(WriteResult::wasApplied);
 	}
 
 	Mono<WriteResult> doUpdate(Query query, org.springframework.data.cassandra.core.query.Update update,
-			Class<?> entityClass, CqlIdentifier tableName) {
+			Class<?> entityClass, TableCoordinates tableCoordinates) {
 
 		StatementBuilder<Update> statement = getStatementFactory().update(query, update,
-				getRequiredPersistentEntity(entityClass), tableName);
+				getRequiredPersistentEntity(entityClass), tableCoordinates);
 
 		return getReactiveCqlOperations().execute(new StatementCallback(statement.build())).next();
 	}
@@ -443,20 +454,20 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(query, "Query must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doDelete(query, entityClass, getTableName(entityClass)).map(WriteResult::wasApplied);
+		return doDelete(query, entityClass, getTableCoordinates(entityClass)).map(WriteResult::wasApplied);
 	}
 
-	Mono<WriteResult> doDelete(Query query, Class<?> entityClass, CqlIdentifier tableName) {
+	Mono<WriteResult> doDelete(Query query, Class<?> entityClass, TableCoordinates tableCoordinates) {
 
 		StatementBuilder<Delete> builder = getStatementFactory().delete(query, getRequiredPersistentEntity(entityClass),
-				tableName);
+				tableCoordinates);
 
 		SimpleStatement delete = builder.build();
 
 		Mono<WriteResult> writeResult = getReactiveCqlOperations().execute(new StatementCallback(delete))
-				.doOnSubscribe(it -> maybeEmitEvent(new BeforeDeleteEvent<>(delete, entityClass, tableName))).next();
+				.doOnSubscribe(it -> maybeEmitEvent(new BeforeDeleteEvent<>(delete, entityClass, tableCoordinates.getTableName()))).next();
 
-		return writeResult.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(delete, entityClass, tableName)));
+		return writeResult.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(delete, entityClass, tableCoordinates.getTableName())));
 	}
 
 	// -------------------------------------------------------------------------
@@ -471,7 +482,7 @@ public class ReactiveCassandraTemplate
 
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doCount(Query.empty(), entityClass, getTableName(entityClass));
+		return doCount(Query.empty(), entityClass, getTableCoordinates(entityClass));
 	}
 
 	/* (non-Javadoc)
@@ -483,13 +494,13 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(query, "Query must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doCount(query, entityClass, getTableName(entityClass));
+		return doCount(query, entityClass, getTableCoordinates(entityClass));
 	}
 
-	Mono<Long> doCount(Query query, Class<?> entityClass, CqlIdentifier tableName) {
+	Mono<Long> doCount(Query query, Class<?> entityClass, TableCoordinates tableCoordinates) {
 
 		StatementBuilder<Select> count = getStatementFactory().count(query, getRequiredPersistentEntity(entityClass),
-				tableName);
+				tableCoordinates);
 
 		return getReactiveCqlOperations().queryForObject(count.build(), Long.class).switchIfEmpty(Mono.just(0L));
 	}
@@ -504,7 +515,7 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(entityClass, "Entity type must not be null");
 
 		CassandraPersistentEntity<?> entity = getRequiredPersistentEntity(entityClass);
-		StatementBuilder<Select> builder = getStatementFactory().selectOneById(id, entity, entity.getTableName());
+		StatementBuilder<Select> builder = getStatementFactory().selectOneById(id, entity, TableCoordinates.of(entity));
 
 		return getReactiveCqlOperations().queryForRows(builder.build()).hasElements();
 	}
@@ -518,13 +529,13 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(query, "Query must not be null");
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		return doExists(query, entityClass, getTableName(entityClass));
+		return doExists(query, entityClass, getTableCoordinates(entityClass));
 	}
 
-	Mono<Boolean> doExists(Query query, Class<?> entityClass, CqlIdentifier tableName) {
+	Mono<Boolean> doExists(Query query, Class<?> entityClass, TableCoordinates tableCoordinates) {
 
 		StatementBuilder<Select> builder = getStatementFactory().select(query.limit(1),
-				getRequiredPersistentEntity(entityClass), tableName);
+				getRequiredPersistentEntity(entityClass), tableCoordinates);
 
 		return getReactiveCqlOperations().queryForRows(builder.build()).hasElements();
 	}
@@ -539,7 +550,7 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(entityClass, "Entity type must not be null");
 
 		StatementBuilder<Select> builder = getStatementFactory().selectOneById(id, getRequiredPersistentEntity(entityClass),
-				getTableName(entityClass));
+				getTableCoordinates(entityClass));
 
 		return selectOne(builder.build(), entityClass);
 	}
@@ -561,12 +572,12 @@ public class ReactiveCassandraTemplate
 		Assert.notNull(entity, "Entity must not be null");
 		Assert.notNull(options, "InsertOptions must not be null");
 
-		return doInsert(entity, options, getTableName(entity.getClass()));
+		return doInsert(entity, options, getTableCoordinates(entity.getClass()));
 	}
 
-	<T> Mono<EntityWriteResult<T>> doInsert(T entity, WriteOptions options, CqlIdentifier tableName) {
+	<T> Mono<EntityWriteResult<T>> doInsert(T entity, WriteOptions options, TableCoordinates tableCoordinates) {
 
-		return maybeCallBeforeConvert(entity, tableName).flatMap(entityToInsert -> {
+		return maybeCallBeforeConvert(entity, tableCoordinates.getTableName()).flatMap(entityToInsert -> {
 
 			AdaptibleEntity<T> source = this.entityOperations.forEntity(entityToInsert,
 					getConverter().getConversionService());
@@ -575,27 +586,27 @@ public class ReactiveCassandraTemplate
 			T entityToUse = source.isVersionedEntity() ? source.initializeVersionProperty() : entityToInsert;
 
 			StatementBuilder<RegularInsert> builder = getStatementFactory().insert(entityToUse, options, persistentEntity,
-					tableName);
+					tableCoordinates);
 
 			if (source.isVersionedEntity()) {
 				builder.apply(Insert::ifNotExists);
-				return doInsertVersioned(builder.build(), entityToUse, source, tableName);
+				return doInsertVersioned(builder.build(), entityToUse, source, tableCoordinates);
 			}
 
-			return doInsert(builder.build(), entityToUse, tableName);
+			return doInsert(builder.build(), entityToUse, tableCoordinates);
 		});
 	}
 
 	private <T> Mono<EntityWriteResult<T>> doInsertVersioned(SimpleStatement insert, T entity, AdaptibleEntity<T> source,
-			CqlIdentifier tableName) {
+			TableCoordinates tableCoordinates) {
 
-		return executeSave(entity, tableName, insert, (result, sink) -> {
+		return executeSave(entity, tableCoordinates, insert, (result, sink) -> {
 
 			if (!result.wasApplied()) {
 
 				sink.error(new OptimisticLockingFailureException(
 						String.format("Cannot insert entity %s with version %s into table %s as it already exists", entity,
-								source.getVersion(), tableName)));
+								source.getVersion(), tableCoordinates.getTableName())));
 
 				return;
 			}
@@ -604,8 +615,8 @@ public class ReactiveCassandraTemplate
 		});
 	}
 
-	private <T> Mono<EntityWriteResult<T>> doInsert(SimpleStatement insert, T entity, CqlIdentifier tableName) {
-		return executeSave(entity, tableName, insert);
+	private <T> Mono<EntityWriteResult<T>> doInsert(SimpleStatement insert, T entity, TableCoordinates tableCoordinates) {
+		return executeSave(entity, tableCoordinates, insert);
 	}
 
 	/* (non-Javadoc)
@@ -627,15 +638,15 @@ public class ReactiveCassandraTemplate
 
 		AdaptibleEntity<T> source = this.entityOperations.forEntity(entity, getConverter().getConversionService());
 		CassandraPersistentEntity<?> persistentEntity = getRequiredPersistentEntity(entity.getClass());
-		CqlIdentifier tableName = persistentEntity.getTableName();
+		TableCoordinates tableCoordinates = TableCoordinates.of(persistentEntity);
 
-		return maybeCallBeforeConvert(entity, tableName).flatMap(entityToUpdate -> {
-			return source.isVersionedEntity() ? doUpdateVersioned(entity, options, tableName, persistentEntity)
-					: doUpdate(entity, options, tableName, persistentEntity);
+		return maybeCallBeforeConvert(entity, tableCoordinates.getTableName()).flatMap(entityToUpdate -> {
+			return source.isVersionedEntity() ? doUpdateVersioned(entity, options, tableCoordinates, persistentEntity)
+					: doUpdate(entity, options, tableCoordinates, persistentEntity);
 		});
 	}
 
-	private <T> Mono<EntityWriteResult<T>> doUpdateVersioned(T entity, UpdateOptions options, CqlIdentifier tableName,
+	private <T> Mono<EntityWriteResult<T>> doUpdateVersioned(T entity, UpdateOptions options, TableCoordinates tableCoordinates,
 			CassandraPersistentEntity<?> persistentEntity) {
 
 		AdaptibleEntity<T> source = getEntityOperations().forEntity(entity, getConverter().getConversionService());
@@ -643,16 +654,16 @@ public class ReactiveCassandraTemplate
 		Number previousVersion = source.getVersion();
 		T toSave = source.incrementVersion();
 
-		StatementBuilder<Update> builder = getStatementFactory().update(toSave, options, persistentEntity, tableName);
+		StatementBuilder<Update> builder = getStatementFactory().update(toSave, options, persistentEntity, tableCoordinates);
 		SimpleStatement update = source.appendVersionCondition(builder, previousVersion).build();
 
-		return executeSave(toSave, tableName, update, (result, sink) -> {
+		return executeSave(toSave, tableCoordinates, update, (result, sink) -> {
 
 			if (!result.wasApplied()) {
 
 				sink.error(new OptimisticLockingFailureException(
 						String.format("Cannot save entity %s with version %s to table %s. Has it been modified meanwhile?", toSave,
-								source.getVersion(), tableName)));
+								source.getVersion(), tableCoordinates.getTableName())));
 
 				return;
 			}
@@ -661,12 +672,12 @@ public class ReactiveCassandraTemplate
 		});
 	}
 
-	private <T> Mono<EntityWriteResult<T>> doUpdate(T entity, UpdateOptions options, CqlIdentifier tableName,
+	private <T> Mono<EntityWriteResult<T>> doUpdate(T entity, UpdateOptions options, TableCoordinates tableCoordinates,
 			CassandraPersistentEntity<?> persistentEntity) {
 
-		StatementBuilder<Update> builder = getStatementFactory().update(entity, options, persistentEntity, tableName);
+		StatementBuilder<Update> builder = getStatementFactory().update(entity, options, persistentEntity, tableCoordinates);
 
-		return executeSave(entity, tableName, builder.build());
+		return executeSave(entity, tableCoordinates, builder.build());
 	}
 
 	/* (non-Javadoc)
@@ -688,25 +699,25 @@ public class ReactiveCassandraTemplate
 
 		AdaptibleEntity<Object> source = this.entityOperations.forEntity(entity, getConverter().getConversionService());
 		CassandraPersistentEntity<?> persistentEntity = getRequiredPersistentEntity(entity.getClass());
-		CqlIdentifier tableName = persistentEntity.getTableName();
+		TableCoordinates tableCoordinates = TableCoordinates.of(persistentEntity);
 
-		StatementBuilder<Delete> builder = getStatementFactory().delete(entity, options, getConverter(), tableName);
+		StatementBuilder<Delete> builder = getStatementFactory().delete(entity, options, getConverter(), tableCoordinates);
 
 		return source.isVersionedEntity()
-				? doDeleteVersioned(source.appendVersionCondition(builder).build(), entity, source, tableName)
-				: doDelete(builder.build(), entity, tableName);
+				? doDeleteVersioned(source.appendVersionCondition(builder).build(), entity, source, tableCoordinates)
+				: doDelete(builder.build(), entity, tableCoordinates);
 	}
 
 	private Mono<WriteResult> doDeleteVersioned(SimpleStatement delete, Object entity, AdaptibleEntity<Object> source,
-			CqlIdentifier tableName) {
+			TableCoordinates tableCoordinates) {
 
-		return executeDelete(entity, tableName, delete, (result, sink) -> {
+		return executeDelete(entity, tableCoordinates, delete, (result, sink) -> {
 
 			if (!result.wasApplied()) {
 
 				sink.error(new OptimisticLockingFailureException(
 						String.format("Cannot delete entity %s with version %s in table %s. Has it been modified meanwhile?",
-								entity, source.getVersion(), tableName)));
+								entity, source.getVersion(), tableCoordinates.getTableName())));
 
 				return;
 			}
@@ -715,8 +726,8 @@ public class ReactiveCassandraTemplate
 		});
 	}
 
-	private Mono<WriteResult> doDelete(SimpleStatement delete, Object entity, CqlIdentifier tableName) {
-		return executeDelete(entity, tableName, delete, (result, sink) -> sink.next(result));
+	private Mono<WriteResult> doDelete(SimpleStatement delete, Object entity, TableCoordinates tableCoordinates) {
+		return executeDelete(entity, tableCoordinates, delete, (result, sink) -> sink.next(result));
 	}
 
 	/* (non-Javadoc)
@@ -748,14 +759,14 @@ public class ReactiveCassandraTemplate
 
 		Assert.notNull(entityClass, "Entity type must not be null");
 
-		CqlIdentifier tableName = getTableName(entityClass);
-		Truncate truncate = QueryBuilder.truncate(tableName);
+		TableCoordinates tableCoordinates = getTableCoordinates(entityClass);
+		Truncate truncate = QueryBuilder.truncate(tableCoordinates.getKeyspaceName().orElse(null), tableCoordinates.getTableName());
 		SimpleStatement statement = truncate.build();
 
 		Mono<Boolean> result = getReactiveCqlOperations().execute(statement)
-				.doOnSubscribe(it -> maybeEmitEvent(new BeforeDeleteEvent<>(statement, entityClass, tableName)));
+				.doOnSubscribe(it -> maybeEmitEvent(new BeforeDeleteEvent<>(statement, entityClass, tableCoordinates.getTableName())));
 
-		return result.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(statement, entityClass, tableName))).then();
+		return result.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(statement, entityClass, tableCoordinates.getTableName()))).then();
 	}
 
 	// -------------------------------------------------------------------------
@@ -798,37 +809,37 @@ public class ReactiveCassandraTemplate
 	// Implementation hooks and utility methods
 	// -------------------------------------------------------------------------
 
-	private <T> Mono<EntityWriteResult<T>> executeSave(T entity, CqlIdentifier tableName, SimpleStatement statement) {
-		return executeSave(entity, tableName, statement, (writeResult, sink) -> sink.next(writeResult));
+	private <T> Mono<EntityWriteResult<T>> executeSave(T entity, TableCoordinates tableCoordinates, SimpleStatement statement) {
+		return executeSave(entity, tableCoordinates, statement, (writeResult, sink) -> sink.next(writeResult));
 	}
 
-	private <T> Mono<EntityWriteResult<T>> executeSave(T entity, CqlIdentifier tableName, SimpleStatement statement,
+	private <T> Mono<EntityWriteResult<T>> executeSave(T entity, TableCoordinates tableCoordinates, SimpleStatement statement,
 			BiConsumer<EntityWriteResult<T>, SynchronousSink<EntityWriteResult<T>>> handler) {
 
 		return Mono.defer(() -> {
 
-			maybeEmitEvent(new BeforeSaveEvent<>(entity, tableName, statement));
+			maybeEmitEvent(new BeforeSaveEvent<>(entity, tableCoordinates.getTableName(), statement));
 
-			return maybeCallBeforeSave(entity, tableName, statement).flatMapMany(entityToSave -> {
+			return maybeCallBeforeSave(entity, tableCoordinates.getTableName(), statement).flatMapMany(entityToSave -> {
 				Flux<WriteResult> execute = getReactiveCqlOperations().execute(new StatementCallback(statement));
 
 				return execute.map(it -> EntityWriteResult.of(it, entityToSave)).handle(handler) //
-						.doOnNext(it -> maybeEmitEvent(new AfterSaveEvent<>(entityToSave, tableName)));
+						.doOnNext(it -> maybeEmitEvent(new AfterSaveEvent<>(entityToSave, tableCoordinates.getTableName())));
 			}).next();
 		});
 
 	}
 
-	private Mono<WriteResult> executeDelete(Object entity, CqlIdentifier tableName, SimpleStatement statement,
+	private Mono<WriteResult> executeDelete(Object entity, TableCoordinates tableCoordinates, SimpleStatement statement,
 			BiConsumer<WriteResult, SynchronousSink<WriteResult>> handler) {
 
-		maybeEmitEvent(new BeforeDeleteEvent<>(statement, entity.getClass(), tableName));
+		maybeEmitEvent(new BeforeDeleteEvent<>(statement, entity.getClass(), tableCoordinates.getTableName()));
 
 		Flux<WriteResult> execute = getReactiveCqlOperations().execute(new StatementCallback(statement));
 
 		return execute.map(it -> EntityWriteResult.of(it, entity)).handle(handler) //
-				.doOnSubscribe(it -> maybeEmitEvent(new BeforeSaveEvent<>(entity, tableName, statement))) //
-				.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(statement, entity.getClass(), tableName))) //
+				.doOnSubscribe(it -> maybeEmitEvent(new BeforeSaveEvent<>(entity, tableCoordinates.getTableName(), statement))) //
+				.doOnNext(it -> maybeEmitEvent(new AfterDeleteEvent<>(statement, entity.getClass(), tableCoordinates.getTableName()))) //
 				.next();
 	}
 

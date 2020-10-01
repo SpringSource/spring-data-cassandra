@@ -15,6 +15,8 @@
  */
 package org.springframework.data.cassandra.core;
 
+import java.util.Optional;
+
 import org.springframework.core.convert.ConversionService;
 import org.springframework.data.cassandra.core.cql.util.StatementBuilder;
 import org.springframework.data.cassandra.core.mapping.CassandraPersistentEntity;
@@ -36,6 +38,7 @@ import com.datastax.oss.driver.api.querybuilder.update.Update;
  *
  * @author Mark Paluch
  * @author John Blum
+ * @author Tomasz Lelek
  * @see CassandraTemplate
  * @see AsyncCassandraTemplate
  * @see ReactiveCassandraTemplate
@@ -98,6 +101,18 @@ class EntityOperations {
 	CqlIdentifier getTableName(Class<?> entityClass) {
 		return getRequiredPersistentEntity(entityClass).getTableName();
 	}
+
+	/**
+	 * Returns the keyspace to which the entity shall be persisted.
+	 *
+	 * @param entityClass entity class, may be {@literal null}.
+	 * @return the keyspace to which the entity shall be persisted.
+	 * If null, then default session-level keyspace will be used.
+	 */
+	Optional<CqlIdentifier> getKeyspaceName(Class<?> entityClass) {
+		return getRequiredPersistentEntity(entityClass).getKeyspaceName();
+	}
+
 
 
 	protected MappingContext<? extends CassandraPersistentEntity<?>, CassandraPersistentProperty> getMappingContext() {
